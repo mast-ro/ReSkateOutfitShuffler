@@ -4,9 +4,6 @@
 #include "Extension/Assets/live_mods.h"
 #include "Extension/Assets/map_download.h"
 #include "Extension/Assets/map_icons.h"
-#include "Extension/Music/spotify_station.h"
-#include "Extension/Multiplayer/Hud/game_ui_state.h"
-#include "Extension/Music/music_inject.h"
 #include "Extension/World/texture_handle_limit.h"
 #include "Engine/Core/Log/logging.h"
 #include "Engine/Core/Profiling/profiler.h"
@@ -16,7 +13,6 @@
 #include "Extension/HallOfMeat/hall_of_meat.h"
 #include "Extension/RoadRash/road_rash.h"
 #include "Extension/BoardBreak/board_break.h"
-#include "Extension/Skater/grind_exit_control.h"
 #include "Extension/Skater/camera_observer.h"
 #include "Extension/UI/NativeMenu/native_menu.h"
 #include "Extension/Multiplayer/Hud/native_party.h"
@@ -42,8 +38,6 @@
 #include "Extension/Trainer/trainer.h"
 #include "Extension/World/level_loading.h"
 #include "Extension/World/loading_screen.h"
-#include <Windows.h>
-#include <TlHelp32.h>
 #include <dxgi.h>
 #include <Psapi.h>
 #include <algorithm>
@@ -416,14 +410,12 @@ void update_model(std::uintptr_t client, TickState& frame) {
     const bool map_prompt = dingosdk::map_download::asking();
     // The vote for the next map comes up the same way (overlay.h: map_vote_asking), when no map is being asked about.
     const bool map_vote = !map_prompt && dingosdk::overlay::map_vote_asking();
-    // And a message to say OK to (overlay.h: message_asking), over either.
-    const bool message_up = dingosdk::overlay::message_asking();
     // The hold on the game's input outlasts the card's question until everything pressed is let
     // go (or a moment has passed): the button that answered must not also be a press in the
     // game, or in the pause menu behind the card.
     static bool prompt_held{};
     static ULONGLONG prompt_release_by{};
-    if (map_prompt || map_vote || message_up) {
+    if (map_prompt || map_vote) {
         prompt_held = true;
         prompt_release_by = 0;
     } else if (prompt_held) {
@@ -434,7 +426,7 @@ void update_model(std::uintptr_t client, TickState& frame) {
                              std::ranges::any_of(held.keys, [](std::uint64_t word) { return word != 0; });
         if (!pressed || GetTickCount64() >= prompt_release_by) prompt_held = false;
     }
-    DingoSDKOverlaySetPromptInputCapture(map_prompt || map_vote || message_up || prompt_held);
+    DingoSDKOverlaySetPromptInputCapture(map_prompt || map_vote || prompt_held);
     const unsigned poll_answers = dingosdk::multiplayer::server_poll_answers();
     bool freecam_controller = dingosdk::local_freecam_controller();
     {
@@ -462,10 +454,10 @@ void update_model(std::uintptr_t client, TickState& frame) {
     DingoSDKOverlaySetFreecamInputCapture(dingosdk::client_free_camera_active() && freecam_controller);
     dingosdk::ControllerInput controller;
     if (freecam_controller_combo || freecam_combo || tp_to_freecam_combo || noclip_combo || forward_velocity_combo || up_velocity_combo || offboard_up_velocity_combo ||
-        vote_yes_combo || vote_no_combo || poll_answers || map_prompt || map_vote || message_up ||
+        vote_yes_combo || vote_no_combo || poll_answers || map_prompt || map_vote ||
         std::ranges::any_of(action_combos, [](auto combo) { return combo != 0; }))
         // (The card that asks has the pointer, as a menu does: it is still read for.)
-        DingoSDKOverlayReadControllerInput(&controller, map_prompt || map_vote || message_up);
+        DingoSDKOverlayReadControllerInput(&controller, map_prompt || map_vote);
     for (std::size_t i = 0; i < action_combos.size(); ++i)
         if (r.action_bind_latches[i].update(action_combos[i], controller, r.observer_failed)) {
             std::array<char, 256> result{};
@@ -491,14 +483,10 @@ void update_model(std::uintptr_t client, TickState& frame) {
         static bool prompt_before{};
         static std::uint32_t buttons_before{};
         // The keyboard's arrows, Enter and Esc do the same, above the pad's bits.
-        const bool prompt = map_prompt || map_vote || message_up;
+        const bool prompt = map_prompt || map_vote;
         const std::uint32_t buttons = !prompt ? 0
             : (controller.available ? controller.buttons : 0) | (DingoSDKOverlayReadPromptKeys() << 20);
-        // The message is over the others and is answered first: A or B, Enter or Esc, is its OK.
-        static bool message_before{};
-        if (message_up && message_before) {
-            if ((buttons & ~buttons_before) & (0x1000 | 0x2000 | 1u << 22 | 1u << 23)) dingosdk::overlay::message_dismiss();
-        } else if (map_prompt && prompt_before) {
+        if (map_prompt && prompt_before) {
             const auto pressed = buttons & ~buttons_before;
             if (pressed & (0x0004 | 1u << 20)) dingosdk::map_download::pick(true);
             if (pressed & (0x0008 | 1u << 21)) dingosdk::map_download::pick(false);
@@ -507,7 +495,7 @@ void update_model(std::uintptr_t client, TickState& frame) {
         }
         // The vote's popup: left and right move the pick, A votes for it, B closes it.
         static bool vote_before{};
-        if (!message_up && map_vote && vote_before) {
+        if (map_vote && vote_before) {
             const auto pressed = buttons & ~buttons_before;
             if (pressed & (0x0004 | 1u << 20)) dingosdk::overlay::map_vote_move(-1);
             if (pressed & (0x0008 | 1u << 21)) dingosdk::overlay::map_vote_move(1);
@@ -515,7 +503,6 @@ void update_model(std::uintptr_t client, TickState& frame) {
             else if (pressed & (0x2000 | 1u << 23)) dingosdk::overlay::map_vote_dismiss();
         }
         vote_before = map_vote;
-        message_before = message_up;
         prompt_before = map_prompt;
         buttons_before = buttons;
     }
@@ -827,7 +814,6 @@ void update_model(std::uintptr_t client, TickState& frame) {
     dingosdk::hall_of_meat::on_client_tick();
     dingosdk::road_rash::on_client_tick(client);
     dingosdk::board_break::on_client_tick(client);
-    dingosdk::grind_exit_control::on_client_tick(client);
     if (!has_request && now < r.next_model && state == r.previous_state) return;
     r.next_model = now + 500;
     DINGO_PROFILE_ZONE("tick/update_model/world model (500 ms)");
@@ -970,9 +956,6 @@ void update_model(std::uintptr_t client, TickState& frame) {
     const auto breakable_deck = dingosdk::board_break::deck();
     model.board_break = {dingosdk::board_break::available(), dingosdk::board_break::enabled(), !breakable_deck.empty(),
                          dingosdk::board_break::deck_label(breakable_deck)};
-    model.grind_exit = {dingosdk::grind_exit_control::available(), dingosdk::grind_exit_control::enabled(),
-                        dingosdk::grind_exit_control::toe_heel(), dingosdk::grind_exit_control::stance(),
-                        dingosdk::grind_exit_control::strength()};
     model.bindings = dingosdk::local_profile_controller_bindings();
     model.parks = dingosdk::local_profile_parks();
     model.world = dingosdk::local_profile_world_layers();
@@ -1227,34 +1210,12 @@ void tick(std::uintptr_t client, std::uintptr_t update) {
             dingosdk::multiplayer::tick(r.base,client,multiplayer_ready,r.multiplayer_map,load_multiplayer_map);
             if (auto notice = dingosdk::multiplayer::take_leave_notice(); !notice.empty())
                 dingosdk::overlay::notify(dingosdk::overlay::NoticeLevel::warning, "Map not installed", std::move(notice));
-            // Kicked, banned or otherwise put out by the host or server: said in the middle of
-            // the screen, to be answered (message_card.cpp).
-            if (auto removed = dingosdk::multiplayer::take_removed_notice(); !removed.empty()) {
-                const char* title = removed.find("banned") != std::string::npos ? "YOU WERE BANNED"
-                                  : removed.find("kicked") != std::string::npos ? "YOU WERE KICKED" : "YOU WERE REMOVED";
-                dingosdk::overlay::show_message(title, std::move(removed));
-            }
             // Or, when the host said which Thunderstore package its map is from, the offer to
             // fetch it (map_download.h), which then applies it and joins the session again.
             if (const auto need = dingosdk::multiplayer::take_map_need()) dingosdk::map_download::offer(*need);
             dingosdk::map_download::tick();
             dingosdk::map_icons::tick();
     dingosdk::texture_handle_limit::tick();
-    // (Whether a menu of the game's is up, the music screen among them: a playlist changed then
-    // is the player's own choice, and one changed in play is a speaker's music being grabbed.)
-    {
-        const bool menu = dingosdk::multiplayer::sample_game_ui_state(r.base).in_menu;
-        static bool was{};
-        if (menu != was) {
-            was = menu;
-            try {
-                dingosdk::logging::log(dingosdk::logging::Level::debug, dingosdk::logging::Channel::music, "Trace: a menu of the game's is {}.", menu ? "up" : "no longer up");
-            } catch (...) {}
-        }
-        dingosdk::spotify_station::set_music_screen(menu);
-    }
-    dingosdk::spotify_station::tick();
-    dingosdk::music_inject::tick();
         }
         dingosdk::multiplayer::refresh_identity_lists();
         // How much memory the game holds, beside what a session adds to it: said when it has
@@ -1273,48 +1234,13 @@ void tick(std::uintptr_t client, std::uintptr_t update) {
                 static std::uint64_t said_private{};
                 static int said_players = -1, said_skaters = -1;
                 const auto moved = counters.PrivateUsage > said_private ? counters.PrivateUsage - said_private : said_private - counters.PrivateUsage;
-                // (And every two minutes whatever it has done: a slow leak moves it by less than
-                // that quarter for a long while.)
-                static std::uint64_t said_at{};
-                if (moved >= (256ull << 20) || std::abs(players - said_players) >= 5 || std::abs(skaters - said_skaters) >= 5 ||
-                        GetTickCount64() - said_at >= 120000) {
-                    said_at = GetTickCount64();
+                if (moved >= (256ull << 20) || std::abs(players - said_players) >= 5 || std::abs(skaters - said_skaters) >= 5) {
                     said_private = counters.PrivateUsage; said_players = players; said_skaters = skaters;
                     const auto gigabytes = [](std::uint64_t bytes) { return static_cast<double>(bytes) / (1024.0 * 1024.0 * 1024.0); };
-                    // Whose memory it is. The game allocates from its own pools; what ReSkate, the
-                    // Spotify library in it and Windows' own libraries allocate comes from the
-                    // process's heaps, so memory that grows there is not the game's (a leak looked
-                    // for in the music player, 2026-10-13). Threads and handles grow with a leak of
-                    // those. HeapSummary is asked for by name: older Windows SDKs do not declare it.
-                    struct Summary { DWORD size; SIZE_T allocated, committed, reserved, most; };
-                    static const auto heap_summary = reinterpret_cast<BOOL (WINAPI*)(HANDLE, DWORD, Summary*)>(
-                        GetProcAddress(GetModuleHandleW(L"kernel32.dll"), "HeapSummary"));
-                    std::uint64_t heap_allocated{}, heap_committed{};
-                    std::array<HANDLE, 256> heaps{};
-                    const auto heap_count = GetProcessHeaps(static_cast<DWORD>(heaps.size()), heaps.data());
-                    for (DWORD i = 0; heap_summary && i < heap_count && i < heaps.size(); ++i) {
-                        Summary summary{sizeof(Summary)};
-                        if (heap_summary(heaps[i], 0, &summary)) {
-                            heap_allocated += summary.allocated;
-                            heap_committed += summary.committed;
-                        }
-                    }
-                    DWORD handles{};
-                    GetProcessHandleCount(GetCurrentProcess(), &handles);
-                    unsigned threads{};
-                    if (const auto snapshot = CreateToolhelp32Snapshot(TH32CS_SNAPTHREAD, 0); snapshot != INVALID_HANDLE_VALUE) {
-                        THREADENTRY32 entry{sizeof(entry)};
-                        const auto self = GetCurrentProcessId();
-                        for (BOOL more = Thread32First(snapshot, &entry); more; more = Thread32Next(snapshot, &entry))
-                            if (entry.th32OwnerProcessID == self) ++threads;
-                        CloseHandle(snapshot);
-                    }
                     dingosdk::logging::printf(dingosdk::logging::Level::info, dingosdk::logging::Channel::runtime,
-                        "Memory: %.2f GB committed, %.2f GB in RAM; %d player(s) in the session, %d built as skaters (player distance %.0f m); map %s. "
-                        "Outside the game's own pools: %.2f GB in use of %.2f GB in %lu heap(s); %u thread(s), %lu handle(s).",
+                        "Memory: %.2f GB committed, %.2f GB in RAM; %d player(s) in the session, %d built as skaters (player distance %.0f m); map %s.",
                         gigabytes(counters.PrivateUsage), gigabytes(counters.WorkingSetSize), players, skaters, mp.player_distance,
-                        (session && !mp.map.empty() ? mp.map : r.multiplayer_map).c_str(),
-                        gigabytes(heap_allocated), gigabytes(heap_committed), heap_count, threads, handles);
+                        (session && !mp.map.empty() ? mp.map : r.multiplayer_map).c_str());
                 }
             }
         }
