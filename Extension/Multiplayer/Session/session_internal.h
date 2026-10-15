@@ -292,6 +292,10 @@ struct Session {
     // A new mode or reroll re-dresses one player at a time, no sooner than this: every
     // re-dressed player can bring textures of their own. Spawns and real outfit changes are not held.
     std::uint64_t next_shuffle_redress{};
+    // The re-dress under way (0: none), when it began and how many players it has re-dressed,
+    // for the log (session.cpp).
+    std::uint64_t shuffle_redress_started{};
+    unsigned shuffle_redressed{};
     float nametag_distance = 120.f; // names within this many metres, dots past it
     // Only players within this many metres have a skater (session.cpp); checked a few times a second.
     float player_distance = 120.f;

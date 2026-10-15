@@ -21,6 +21,7 @@
 #include "Extension/Skater/no_bail.h"
 #include "Extension/Skater/physics_tuning.h"
 #include "Extension/Multiplayer/Remote/remote_collision.h"
+#include "Extension/World/texture_handle_limit.h"
 #include "Engine/Core/Log/logging.h"
 #include "Engine/Core/Text/word_filter.h"
 #include "Engine/Game/Multiplayer/session_tools.h"
@@ -514,8 +515,18 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
     const auto shuffle_for = [](std::uint64_t id, ShuffleMode mode, std::uint64_t epoch) {
         return mode == ShuffleMode::off ? Shuffle{} : Shuffle{mode, shuffle_seed(id, epoch)};
     };
+    // Shown players still wearing an earlier shuffle than the session's: those a re-dress has left.
+    const auto redress_waiting = [&] {
+        unsigned waiting{};
+        for (auto &p : active_peers(s))
+            if (p.visible && p.appearance.value() &&
+                shuffle_for(p.member.id, p.shuffle_mode, p.shuffle_epoch) != shuffle_for(p.member.id, s.shuffle_mode, s.shuffle_epoch))
+                ++waiting;
+        return waiting;
+    };
     const auto apply_cosmetics = [&](Peer &p, bool spawned) {
         if (now - p.last_cosmetic_apply < 500000) return;
+        bool staged{};
         // A spawn or a real outfit change takes the current shuffle with it. A new mode or reroll
         // alone waits its turn (shuffle_redress_interval_us); until then the player keeps theirs.
         bool adopt = spawned;
@@ -528,11 +539,18 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
                        shuffle_for(p.member.id, s.shuffle_mode, s.shuffle_epoch)) {
             native_pass = true;
             s.next_shuffle_redress = now + shuffle_redress_interval_us;
-            adopt = true;
+            adopt = staged = true;
         }
         if (adopt) {
             p.shuffle_mode = s.shuffle_mode;
             p.shuffle_epoch = s.shuffle_epoch;
+        }
+        if (staged) {
+            ++s.shuffle_redressed;
+            const auto textures = texture_handle_limit::use();
+            logging::log(logging::Level::info, logging::Channel::runtime,
+                         "Multiplayer: shuffled outfits re-dressed {} ({} done, {} waiting); {} of {} streamed textures in use.",
+                         p.member.name, s.shuffle_redressed, redress_waiting(), textures.taken, textures.limit);
         }
         update_remote_cosmetics(s.base, local, *p.appearance.value(), p.cosmetic_status,
                                 shuffle_for(p.member.id, p.shuffle_mode, p.shuffle_epoch));
@@ -705,6 +723,14 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
             }
         }
     });
+    // A re-dress is done once no shown player is left on an earlier shuffle.
+    if (s.shuffle_redress_started && !redress_waiting()) {
+        const auto textures = texture_handle_limit::use();
+        logging::log(logging::Level::info, logging::Channel::runtime,
+                     "Multiplayer: shuffled outfits: all players re-dressed ({} in {:.1f} s); {} of {} streamed textures in use.",
+                     s.shuffle_redressed, static_cast<double>(now - s.shuffle_redress_started) / 1e6, textures.taken, textures.limit);
+        s.shuffle_redress_started = 0;
+    }
     // The local player's own lines, above their own skater, when asked for.
     if (labels && bubbles && s.chat_bubbles_own && local.ready) {
         auto own = recent_bubbles(s.transport.status().local_id);

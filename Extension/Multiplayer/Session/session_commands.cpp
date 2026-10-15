@@ -369,6 +369,8 @@ std::string edit_shuffle_outfits(Session &s, std::string_view argument) {
     // Every player's skater puts its outfit on again in turn, one per
     // shuffle_redress_interval_us (session.cpp).
     if (changed || reroll) {
+        s.shuffle_redress_started = now_us();
+        s.shuffle_redressed = 0;
         unsigned redressed{};
         for (auto &peer : active_peers(s))
             if (peer.appearance.value()) ++redressed;
