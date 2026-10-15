@@ -1,6 +1,6 @@
 # ReSkate Outfit Shuffler
 
-A mod for [ReSkate](https://github.com/Dingo-Shenanigans/ReSkate) that shows other players' outfits
+A mod for [ReSkate v2.0.7](https://github.com/Dingo-Shenanigans/ReSkate) that shows other players' outfits
 and boards as random items, for you only. Turn it on and everyone in your lobby is wearing something
 new: a different shirt, other shoes, a deck you have never seen them ride.
 
