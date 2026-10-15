@@ -76,13 +76,3 @@ One setting, **Shuffle outfits**, with three values:
   `check_shuffle_room` only tells the player, once, and again after use falls under 70%.
 - If anything fails (the catalog is not ready, or the result does not validate), the outfit is
   shown with the stand-ins and a warning is logged, three times at most.
-
-## Not tried yet
-
-- In game: nothing here has been built or run against `Skate.exe`, and the menu rows have not been
-  drawn. The pure rules, the mode words and the console handler are tested on Linux; the catalog
-  walk, the apply path and the menus reuse the existing code's patterns but were not compiled.
-- Whether a costume or full-body outfit slot gives odd results under Everything, when another item
-  takes its place.
-- Whether board parts that belong together (a grip cutout made for one deck shape, say) can end up
-  mismatched. The only check is the game's own: an item must fit its slot's category.
