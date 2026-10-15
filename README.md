@@ -1,4 +1,4 @@
-# ReSkate Outfit Shuffler
+# ReSkate Outfit Shuffler v1.1
 
 A mod for [ReSkate v2.0.7](https://github.com/Dingo-Shenanigans/ReSkate) that shows other players' outfits
 and boards as random items, for you only. Turn it on and everyone in your lobby is wearing something
@@ -30,24 +30,29 @@ One setting, **Shuffle outfits**, with three values:
 - **Reroll** deals everyone new picks at any time.
 - **Your mods count.** The picks come from every cosmetic installed on your PC, including mod items
   you have.
+- **Mod items only** narrows the picks to items a mod installed, in whichever mode. It needs the
+  game's content pack installed to tell mod items from the game's own. A slot no mod item fits
+  keeps what it shows.
 
 ## Using it
 
 - In game, open the ReSkate menu (**Insert**) and go to the **Online** tab. Under **OUTFITS**, press
-  **Shuffle outfits** to step through Nothing, Everything and Not installed. **Reroll shuffle** below
-  it deals new picks.
-- It is also under **Settings > Interface**.
+  **Shuffle outfits** to step through Nothing, Everything and Not installed. **Mod items only** below
+  it turns the mod-only pool on and off, and **Reroll shuffle** deals new picks.
+- It is also under **Settings > Interface**, with a **Shuffle from mod items only** switch and a
+  **Reroll shuffle** button.
 - From the console (**~**):
 
   ```
   mp shuffle-outfits off|all|missing|cycle|reroll
+  mp shuffle-mods-only on|off|toggle
   ```
 
   `off`, `all` and `missing` set Nothing, Everything and Not installed. `cycle` steps to the next
   value in the menu's order: Nothing, Everything, Not installed, then back to Nothing. `reroll` deals
-  new picks.
+  new picks. `shuffle-mods-only` sets Mod items only.
 
-- Your choice is saved with your profile.
+- Your choices are saved with your profile.
 
 ## Keeping the game stable
 
