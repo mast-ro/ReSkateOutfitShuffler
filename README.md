@@ -118,7 +118,8 @@ To work in Visual Studio, open `build/vs2022-x64/DingoSDK.sln` after configuring
 
 ### Running your build
 
-Close the game. Copy `ReSkateLauncher.exe` and `ReSkate.dll` beside `Skate.exe`, then run the launcher.
+Close the game. Copy `ReSkateLauncher.exe` and `ReSkate.dll` into your ReSkate folder (the one the
+launcher installed the game into, beside `Skate.exe`), then run the launcher.
 
 Local builds never replace themselves. They only report that an update exists, so a release can't
 overwrite the DLL you are testing.
@@ -146,14 +147,14 @@ Useful launcher flags:
 | `DINGOSDK_VERSION` | `0.0.0` | version stamped into the binaries |
 | `DINGOSDK_LAUNCHER_AUTO_UPDATE` | `OFF` | let the launcher replace itself and `ReSkate.dll`, and the server replace itself (release builds) |
 | `DINGOSDK_RELEASE_REPO` | `Dingo-Shenanigans/ReSkate` | public GitHub repository whose latest release carries `launcher.json` and the files it pins |
-| `DINGOSDK_BACKTRACE_URL` | the project's endpoint | Backtrace minidump submission URL; empty turns crash uploads off |
+| `DINGOSDK_CRASH_REPORT_URL` | the project's endpoint | Sentry minidump endpoint URL; empty turns crash uploads off |
 | `DINGOSDK_TEST_GAME_ROOT` | empty | a Skate folder, for the tests that read real game data |
 
 ### Tests
 
 Each module keeps its regression tests in a `Test/` folder. Turn them on with any of
 `DINGOSDK_BUILD_MULTIPLAYER_TESTS`, `DINGOSDK_BUILD_LAUNCHER_TESTS`, `DINGOSDK_BUILD_PARK_EDITOR_TESTS`
-and `DINGOSDK_BUILD_BACKTRACE_TESTS`, then run CTest:
+and `DINGOSDK_BUILD_CRASH_REPORT_TESTS`, then run CTest:
 
 ```powershell
 cmake --preset vs2022-x64 -DDINGOSDK_BUILD_MULTIPLAYER_TESTS=ON -DDINGOSDK_BUILD_LAUNCHER_TESTS=ON
