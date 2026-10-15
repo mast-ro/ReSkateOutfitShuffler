@@ -657,6 +657,16 @@ void shuffle_room_checks() {
           "A reroll near the texture limit was refused");
     (void)edit_shuffle_outfits(s, "missing");
     check(s.shuffle_mode == ShuffleMode::not_installed, "A mode near the texture limit was refused");
+    // Mod items only is apart from the mode: either changes without the other.
+    check(edit_shuffle_mods_only(s, "on") == "Shuffled outfits pick only items a mod installed." && s.shuffle_mods_only &&
+              s.shuffle_mode == ShuffleMode::not_installed && revision == before,
+          "Mod items only changed the mode, or re-dressed at once");
+    (void)edit_shuffle_outfits(s, "all");
+    check(s.shuffle_mods_only && s.shuffle_mode == ShuffleMode::everything, "A new mode turned mod items only off");
+    check(edit_shuffle_mods_only(s, "maybe").starts_with("Use on, off") && s.shuffle_mods_only, "A bad word changed mod items only");
+    (void)edit_shuffle_mods_only(s, "toggle");
+    check(!s.shuffle_mods_only, "Mod items only did not toggle");
+    (void)edit_shuffle_outfits(s, "missing");
 
     limit.taken = 1000; // well under: told again next time
     check_shuffle_room(s);

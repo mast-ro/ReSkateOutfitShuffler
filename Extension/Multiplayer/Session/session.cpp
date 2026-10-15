@@ -309,10 +309,10 @@ void publish_party(Session &s) {
         s.nametags = profile_runtime::local_preference("Nametags").value_or(true);
         if (const auto saved = profile_runtime::local_value("ShuffleMode"); saved && saved->is_number())
             s.shuffle_mode = shuffle_mode_from(static_cast<long long>(saved->get<double>()));
+        s.shuffle_mods_only = profile_runtime::local_preference("ShuffleModsOnly").value_or(false);
         s.shuffle_epoch = now_us();
-        logging::log(logging::Level::info, logging::Channel::runtime,
-                     "Multiplayer: shuffled outfits mode {} loaded from the profile (epoch {}).",
-                     static_cast<int>(s.shuffle_mode), s.shuffle_epoch);
+        logging::log(logging::Level::info, logging::Channel::runtime, "Multiplayer: shuffled outfits loaded from the profile ({}).",
+                     shuffle_state(s));
         if (const auto saved = profile_runtime::local_value("NametagDistance"); saved && saved->is_number())
             s.nametag_distance = std::clamp(saved->get<float>(), 10.f, 500.f);
         s.nametag_dots = profile_runtime::local_preference("NametagDots").value_or(true);
@@ -512,16 +512,20 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
     bool native_pass{};
     // Near the game's limit of textures shuffled outfits pick only items already loaded.
     check_shuffle_room(s);
-    const auto shuffle_for = [](std::uint64_t id, ShuffleMode mode, std::uint64_t epoch) {
-        return mode == ShuffleMode::off ? Shuffle{} : Shuffle{mode, shuffle_seed(id, epoch)};
+    const auto shuffle_for = [](std::uint64_t id, ShuffleMode mode, std::uint64_t epoch, bool mods_only) {
+        return mode == ShuffleMode::off ? Shuffle{} : Shuffle{mode, shuffle_seed(id, epoch), mods_only};
+    };
+    const auto worn_shuffle = [&](const Peer &p) {
+        return shuffle_for(p.member.id, p.shuffle_mode, p.shuffle_epoch, p.shuffle_mods_only);
+    };
+    const auto session_shuffle = [&](const Peer &p) {
+        return shuffle_for(p.member.id, s.shuffle_mode, s.shuffle_epoch, s.shuffle_mods_only);
     };
     // Shown players still wearing an earlier shuffle than the session's: those a re-dress has left.
     const auto redress_waiting = [&] {
         unsigned waiting{};
         for (auto &p : active_peers(s))
-            if (p.visible && p.appearance.value() &&
-                shuffle_for(p.member.id, p.shuffle_mode, p.shuffle_epoch) != shuffle_for(p.member.id, s.shuffle_mode, s.shuffle_epoch))
-                ++waiting;
+            if (p.visible && p.appearance.value() && worn_shuffle(p) != session_shuffle(p)) ++waiting;
         return waiting;
     };
     const auto apply_cosmetics = [&](Peer &p, bool spawned) {
@@ -534,9 +538,7 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
             if (native_pass) return;
             native_pass = true;
             adopt = true;
-        } else if (!spawned && !native_pass && now >= s.next_shuffle_redress &&
-                   shuffle_for(p.member.id, p.shuffle_mode, p.shuffle_epoch) !=
-                       shuffle_for(p.member.id, s.shuffle_mode, s.shuffle_epoch)) {
+        } else if (!spawned && !native_pass && now >= s.next_shuffle_redress && worn_shuffle(p) != session_shuffle(p)) {
             native_pass = true;
             s.next_shuffle_redress = now + shuffle_redress_interval_us;
             adopt = staged = true;
@@ -544,16 +546,16 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
         if (adopt) {
             p.shuffle_mode = s.shuffle_mode;
             p.shuffle_epoch = s.shuffle_epoch;
+            p.shuffle_mods_only = s.shuffle_mods_only;
         }
         if (staged) {
             ++s.shuffle_redressed;
             const auto textures = texture_handle_limit::use();
             logging::log(logging::Level::info, logging::Channel::runtime,
-                         "Multiplayer: shuffled outfits re-dressed {} ({} done, {} waiting); {} of {} streamed textures in use.",
-                         p.member.name, s.shuffle_redressed, redress_waiting(), textures.taken, textures.limit);
+                         "Multiplayer: shuffled outfits re-dressed {} ({} done, {} waiting; {}); {} of {} streamed textures in use.",
+                         p.member.name, s.shuffle_redressed, redress_waiting(), shuffle_state(s), textures.taken, textures.limit);
         }
-        update_remote_cosmetics(s.base, local, *p.appearance.value(), p.cosmetic_status,
-                                shuffle_for(p.member.id, p.shuffle_mode, p.shuffle_epoch));
+        update_remote_cosmetics(s.base, local, *p.appearance.value(), p.cosmetic_status, worn_shuffle(p));
         // The effects their costume and board items come with follow the outfit.
         if (p.applied_cosmetics != p.cosmetic_revision && s.sync_effects) note_remote_outfit(now);
         p.last_cosmetic_apply = now;
@@ -727,8 +729,9 @@ void render(Session &s, std::uintptr_t client, const NativeFrame &local, std::ui
     if (s.shuffle_redress_started && !redress_waiting()) {
         const auto textures = texture_handle_limit::use();
         logging::log(logging::Level::info, logging::Channel::runtime,
-                     "Multiplayer: shuffled outfits: all players re-dressed ({} in {:.1f} s); {} of {} streamed textures in use.",
-                     s.shuffle_redressed, static_cast<double>(now - s.shuffle_redress_started) / 1e6, textures.taken, textures.limit);
+                     "Multiplayer: shuffled outfits: all players re-dressed ({} in {:.1f} s; {}); {} of {} streamed textures in use.",
+                     s.shuffle_redressed, static_cast<double>(now - s.shuffle_redress_started) / 1e6, shuffle_state(s),
+                     textures.taken, textures.limit);
         s.shuffle_redress_started = 0;
     }
     // The local player's own lines, above their own skater, when asked for.

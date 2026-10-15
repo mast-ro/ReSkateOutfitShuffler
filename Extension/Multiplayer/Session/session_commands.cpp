@@ -16,6 +16,7 @@
 #include <cmath>
 #include <cstdio>
 #include <charconv>
+#include <format>
 #include <sstream>
 #include <stdexcept>
 #include <ctime>
@@ -353,6 +354,19 @@ const char *shuffle_mode_word(ShuffleMode mode) {
     }
     return "off";
 }
+// Every player's skater puts its outfit on again in turn, one per shuffle_redress_interval_us
+// (session.cpp). `what` says what changed, for the log.
+void start_shuffle_redress(Session &s, std::string_view what) {
+    s.shuffle_redress_started = now_us();
+    s.shuffle_redressed = 0;
+    unsigned redressed{};
+    for (auto &peer : active_peers(s))
+        if (peer.appearance.value()) ++redressed;
+    const auto textures = texture_handle_limit::use();
+    logging::log(logging::Level::info, logging::Channel::runtime,
+                 "Multiplayer: shuffled outfits {} ({}); {} players to re-dress, {} of {} streamed textures in use.", what,
+                 shuffle_state(s), redressed, textures.taken, textures.limit);
+}
 std::string edit_shuffle_outfits(Session &s, std::string_view argument) {
     const bool reroll = argument == "reroll";
     const auto previous = s.shuffle_mode;
@@ -366,20 +380,10 @@ std::string edit_shuffle_outfits(Session &s, std::string_view argument) {
     s.display_preferences_loaded = true;
     if (reroll) s.shuffle_epoch = now_us();
     profile_runtime::set_local_values({{"ShuffleMode", static_cast<double>(static_cast<int>(s.shuffle_mode))}});
-    // Every player's skater puts its outfit on again in turn, one per
-    // shuffle_redress_interval_us (session.cpp).
-    if (changed || reroll) {
-        s.shuffle_redress_started = now_us();
-        s.shuffle_redressed = 0;
-        unsigned redressed{};
-        for (auto &peer : active_peers(s))
-            if (peer.appearance.value()) ++redressed;
-        const auto textures = texture_handle_limit::use();
-        logging::log(logging::Level::info, logging::Channel::runtime,
-                     "Multiplayer: shuffled outfits {} (mode {} -> {}, epoch {}); {} players to re-dress, {} of {} streamed textures in use{}.",
-                     reroll ? "rerolled" : "mode changed", shuffle_mode_word(previous), shuffle_mode_word(s.shuffle_mode),
-                     s.shuffle_epoch, redressed, textures.taken, textures.limit, s.shuffle_loaded_only ? ", loaded items only" : "");
-    }
+    if (reroll)
+        start_shuffle_redress(s, "rerolled");
+    else if (changed)
+        start_shuffle_redress(s, std::string("mode changed from ") + shuffle_mode_word(previous));
     if (reroll) return "Everyone's items were shuffled again.";
     switch (s.shuffle_mode) {
     case ShuffleMode::everything: return "Every item other players wear is random, for you only.";
@@ -387,6 +391,24 @@ std::string edit_shuffle_outfits(Session &s, std::string_view argument) {
     case ShuffleMode::off: break;
     }
     return "Other players' items show as they wear them; ones you don't have installed use the usual stand-ins.";
+}
+// Which items the shuffle picks from, whatever the mode: every installed item, or only those a
+// mod installed. Kept apart from the mode, so either can change without the other.
+std::string edit_shuffle_mods_only(Session &s, std::string_view argument) {
+    const auto enabled = parse_switch(argument, s.shuffle_mods_only);
+    if (!enabled) return "Use on, off, or toggle for shuffling from mod items only.";
+    const bool changed = *enabled != s.shuffle_mods_only;
+    s.shuffle_mods_only = *enabled;
+    s.display_preferences_loaded = true;
+    profile_runtime::set_local_preference("ShuffleModsOnly", s.shuffle_mods_only);
+    const char *what = s.shuffle_mods_only ? "mod items only turned on" : "mod items only turned off";
+    if (changed && s.shuffle_mode != ShuffleMode::off)
+        start_shuffle_redress(s, what);
+    else if (changed)
+        logging::log(logging::Level::info, logging::Channel::runtime,
+                     "Multiplayer: shuffled outfits {} ({}); nobody to re-dress while the shuffle is off.", what, shuffle_state(s));
+    return s.shuffle_mods_only ? "Shuffled outfits pick only items a mod installed."
+                               : "Shuffled outfits pick from every installed item.";
 }
 // The Special page: a player on one of the backend's lists going without their tag, or
 // without the animation on their items. Their next appearance packet tells everyone
@@ -660,6 +682,11 @@ bool own_mark_command(std::string_view action) {
     return action == "mark-tag" || action == "mark-items" || action == "mark-style";
 }
 } // namespace
+std::string session_detail::shuffle_state(const Session &s) {
+    return std::format("mode {}, {}, epoch {}{}", shuffle_mode_word(s.shuffle_mode),
+                       s.shuffle_mods_only ? "mod items only" : "every item", s.shuffle_epoch,
+                       s.shuffle_loaded_only ? ", loaded items only" : "");
+}
 void session_detail::check_shuffle_room(Session &s) {
     if (s.shuffle_mode == ShuffleMode::off) return;
     const auto use = texture_handle_limit::use();
@@ -672,8 +699,8 @@ void session_detail::check_shuffle_room(Session &s) {
     if (shuffle_texture_room(use.taken, use.limit)) return;
     s.shuffle_loaded_only = true;
     logging::log(logging::Level::info, logging::Channel::runtime,
-                 "Multiplayer: shuffled outfits pick only items already loaded, with {} of {} streamed textures in use.", use.taken,
-                 use.limit);
+                 "Multiplayer: shuffled outfits pick only items already loaded ({}), with {} of {} streamed textures in use.",
+                 shuffle_state(s), use.taken, use.limit);
     add_chat(s, 0, "ReSkate",
              "The game is close to its limit of textures, so shuffled outfits now only use items the game has already loaded.");
 }
@@ -681,7 +708,7 @@ bool queue_command(std::string_view action, std::string_view argument, std::stri
     if (launcher::offline_mode() && !own_mark_command(action)) return false;
     if ((action != "host" && action != "host-config" && action != "join" && action != "rejoin" && action != "join-lobby" && action != "join-friend-lobby" && action != "stop" &&
          action != "distances" && action != "object-placement" && action != "object-limit" && action != "kick" && action != "clear-objects" &&
-         action != "nametags" && action != "shuffle-outfits" && action != "chat-visible" && action != "chat-filter" &&
+         action != "nametags" && action != "shuffle-outfits" && action != "shuffle-mods-only" && action != "chat-visible" && action != "chat-filter" &&
          action != "nametag-distance" && action != "nametag-dots" && action != "nametags-friends" && action != "player-distance" && action != "direct-connections" && action != "pose-dump" && action != "vote" && action != "voice-chat" &&
          action != "chat-bubbles" && action != "chat-bubbles-own" && action != "chat-bubbles-distance" &&
          action != "chat-bubbles-duration" && action != "chat-bubbles-history" &&
@@ -898,7 +925,7 @@ std::string command(std::string_view action, std::string_view argument, std::str
             {"ban", ban_player},                           {"unban", unban_player},
             {"clear-objects", clear_guest_objects},
             {"world-layer-sync", edit_world_layer_sync},   {"distances", edit_distances},
-            {"nametags", edit_nametags}, {"shuffle-outfits", edit_shuffle_outfits},
+            {"nametags", edit_nametags}, {"shuffle-outfits", edit_shuffle_outfits}, {"shuffle-mods-only", edit_shuffle_mods_only},
             {"nametag-distance", edit_nametag_distance}, {"nametag-dots", edit_nametag_dots},
             {"nametags-friends", edit_nametags_friends}, {"player-distance", edit_player_distance}, {"direct-connections", edit_direct_connections}, {"pose-dump", start_pose_dump},
             {"mark-tag", edit_own_tag}, {"mark-items", edit_own_items}, {"mark-style", edit_mark_style},

@@ -51,17 +51,19 @@ inline constexpr bool shuffle_texture_room(std::uint32_t taken, std::uint32_t li
 }
 
 // What to shuffle for one player: the mode, and the player's seed (shuffle_seed). Both must
-// say so; a default one shuffles nothing.
+// say so; a default one shuffles nothing. `mods_only` picks only from items a mod installed
+// (ShuffleCatalog::mods), whichever slots the mode covers.
 struct Shuffle {
     ShuffleMode mode{};
     std::uint64_t seed{};
+    bool mods_only{};
     bool active() const noexcept { return mode != ShuffleMode::off && seed != 0; }
     // The same for the player's board, with a seed of its own so its picks do not follow the
     // clothes'. An inactive shuffle stays inactive (and compares equal to a default one).
     Shuffle board() const noexcept {
         if (!active()) return {};
         const auto derived = seed ^ 0xb0a4d5eedULL;
-        return {mode, derived ? derived : 1};
+        return {mode, derived ? derived : 1, mods_only};
     }
     bool operator==(const Shuffle &) const = default;
 };
@@ -69,6 +71,7 @@ struct Shuffle {
 struct ShuffleCandidate {
     std::string name;
     std::vector<std::uint32_t> categories;
+    bool modded{}; // a mod installed it: it is in no retail catalogue
 };
 
 // The installed cosmetics, indexed by the categories they fit. A slot takes an item whose
@@ -84,6 +87,7 @@ public:
             if (item.name.empty() || (!names_.empty() && names_.back() == item.name)) continue;
             const auto index = names_.size();
             names_.push_back(std::move(item.name));
+            modded_.push_back(item.modded);
             std::sort(item.categories.begin(), item.categories.end());
             item.categories.erase(std::unique(item.categories.begin(), item.categories.end()), item.categories.end());
             for (const auto category : item.categories) by_category_[category].push_back(index);
@@ -91,6 +95,7 @@ public:
     }
     std::size_t size() const noexcept { return names_.size(); }
     const std::string &name(std::size_t index) const { return names_[index]; }
+    bool modded(std::size_t index) const { return modded_[index]; }
     // Indices of the items that fit `category`, or nothing.
     const std::vector<std::size_t> *in_category(std::uint32_t category) const {
         const auto found = by_category_.find(category);
@@ -99,21 +104,31 @@ public:
     // The same catalog with only the items named in `names` (sorted). Names it does not hold
     // are not added: an item outside the catalog (reserved, or not installed) stays out.
     ShuffleCatalog only(const std::vector<std::string> &names) const {
+        return keep_if([&](std::size_t index) { return std::binary_search(names.begin(), names.end(), names_[index]); });
+    }
+    // The same catalog with only the items a mod installed. Empty when there are none, or when
+    // nothing could be judged modded (no content pack installed).
+    ShuffleCatalog mods() const {
+        return keep_if([&](std::size_t index) { return modded_[index]; });
+    }
+
+private:
+    template <class Keep> ShuffleCatalog keep_if(Keep keep) const {
         std::map<std::size_t, ShuffleCandidate> kept;
         for (const auto &[category, indices] : by_category_)
             for (const auto index : indices)
-                if (std::binary_search(names.begin(), names.end(), names_[index])) {
+                if (keep(index)) {
                     auto &item = kept[index];
                     item.name = names_[index];
+                    item.modded = modded_[index];
                     item.categories.push_back(category);
                 }
         std::vector<ShuffleCandidate> items;
         for (auto &[index, item] : kept) items.push_back(std::move(item));
         return ShuffleCatalog(std::move(items));
     }
-
-private:
     std::vector<std::string> names_;
+    std::vector<bool> modded_;
     std::map<std::uint32_t, std::vector<std::size_t>> by_category_;
 };
 

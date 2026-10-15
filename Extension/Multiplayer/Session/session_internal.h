@@ -116,10 +116,11 @@ struct Peer {
     // Bumped per accepted outfit; render compares it with the one its actor wears
     // (0 after a spawn) to spread native recipe applies over frames.
     std::uint64_t cosmetic_revision{}, applied_cosmetics{};
-    // The shuffle (mode and epoch) their skater wears. A new mode or reroll reaches them in
-    // turn, one player per shuffle_redress_interval_us (session.cpp).
+    // The shuffle (mode, epoch and pool) their skater wears. A new mode, pool or reroll reaches
+    // them in turn, one player per shuffle_redress_interval_us (session.cpp).
     ShuffleMode shuffle_mode{};
     std::uint64_t shuffle_epoch{};
+    bool shuffle_mods_only{};
     DeveloperHoodieState developer_hoodie;
     DeveloperBoardState developer_board;
     AudioBuffer audio;
@@ -285,9 +286,11 @@ struct Session {
     unsigned capacity = max_players;
     // Local display preferences, loaded once from the profile. Never sent to peers.
     bool nametags = true, chat_visible = true, display_preferences_loaded{};
-    // Shuffled outfits (outfit_shuffle.h) A new epoch is a re-roll. Never sent to peers.
+    // Shuffled outfits (outfit_shuffle.h) A new epoch is a re-roll. `shuffle_mods_only` picks only
+    // from items a mod installed, in whichever mode. Never sent to peers.
     ShuffleMode shuffle_mode{};
     std::uint64_t shuffle_epoch{1};
+    bool shuffle_mods_only{};
     bool shuffle_loaded_only{};
     // A new mode or reroll re-dresses one player at a time, no sooner than this: every
     // re-dressed player can bring textures of their own. Spawns and real outfit changes are not held.
@@ -466,6 +469,9 @@ void add_chat(Session &s, std::uint64_t sender, std::string name, std::string te
 // (shuffle_texture_ceiling), where shuffled outfits pick only items already loaded
 // (native_cosmetics.cpp), and again only after use has fallen well below it. Client thread.
 void check_shuffle_room(Session &s);
+// The shuffle as the log shows it: "mode all, mod items only, epoch 123", and ", loaded items
+// only" near the texture limit.
+std::string shuffle_state(const Session &s);
 // The colour and badge of one of the backend's categories.
 std::pair<std::uint32_t, std::string> mark_role(IdentityList list);
 // A player's role colour and badge ("Dev", "Staff", "Content Creator", "Centrix", "Homie", "Admin", "Host", "Friend" or none), shown in chat

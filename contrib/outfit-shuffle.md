@@ -9,7 +9,7 @@ Code: [outfit_shuffle.h](../Extension/Multiplayer/Remote/outfit_shuffle.h) (the 
 with [tests](../Extension/Multiplayer/Test/outfit_shuffle_tests.cpp)),
 [native_cosmetics.cpp](../Extension/Multiplayer/Remote/native_cosmetics.cpp) (reading the catalog and
 putting the outfit on), [session_commands.cpp](../Extension/Multiplayer/Session/session_commands.cpp)
-(`edit_shuffle_outfits`), [hub_page.cpp](../Extension/UI/Overlay/hub_page.cpp) and
+(`edit_shuffle_outfits`, `edit_shuffle_mods_only`), [hub_page.cpp](../Extension/UI/Overlay/hub_page.cpp) and
 [multiplayer_menu.cpp](../Extension/UI/Overlay/multiplayer_menu.cpp) (the menus).
 
 ## What the player gets
@@ -22,11 +22,15 @@ One setting, **Shuffle outfits**, with three values:
 | **Everything** | Every item they wear or ride is a random item that fits its slot, installed or not. |
 | **Not installed** | Only the items you do not have installed are random, in place of the stand-in. Items you have show as worn. |
 
+- A second setting, **Mod items only**, apart from the mode: the picks come only from items a mod
+  installed, in whichever mode. Either can change without the other.
 - It is in the ReSkate menu (Insert), **Online** tab, under OUTFITS: pressing the row steps Nothing,
-  Everything, Not installed, and round. **Reroll shuffle** below it deals everyone new picks. It is
-  also under Settings > Interface, as a strip of three.
-- Console: `mp shuffle-outfits off|all|missing|cycle|reroll`.
-- The choice is saved with the profile (`ShuffleMode`: 0 nothing, 1 everything, 2 not installed).
+  Everything, Not installed, and round. **Mod items only** and **Reroll shuffle** (new picks for
+  everyone) are below it. It is also under Settings > Interface: a strip of three, the mod-items
+  switch and a Reroll shuffle button.
+- Console: `mp shuffle-outfits off|all|missing|cycle|reroll` and `mp shuffle-mods-only on|off|toggle`.
+- The choices are saved with the profile (`ShuffleMode`: 0 nothing, 1 everything, 2 not installed;
+  `ShuffleModsOnly`, a preference).
 - Boards work the same way: deck graphic, grip, trucks and wheels. A board's seed is the player's,
   with a constant mixed in (`Shuffle::board`), so its picks do not follow their clothes'.
 - A slot the player left empty stays empty, so nobody is handed a hat or a tattoo they did not wear.
@@ -56,14 +60,22 @@ One setting, **Shuffle outfits**, with three values:
 - **The catalog** is every installed cosmetic, read from the game's cosmetics manager
   (`CosmeticMemory::catalog`). It is names and categories only, kept until the number of installed
   items changes (a mod applied live), so mod items you have are included.
+- **Mod items** are the catalog's items that are in no retail catalogue of the installed content
+  cache (`content_cache::catalogs().items`, by lower-cased name), the same test as the item
+  browser's Mods filter. `ShuffleCatalog::mods` cuts the catalog to them, and `shuffle_catalog`
+  keeps that cut alongside the whole one. With no content pack installed nothing can be judged
+  modded, so the mod-only pool is empty and every slot keeps what it shows. A mod that replaces a
+  retail item under its own name counts as the game's. The cut is made before the texture-room cut
+  below, so near the limit the pool is the loaded mod items.
 - **The pick** is seeded by the player's Steam ID and the session's shuffle epoch, and per slot, so
   one slot changing does not move the others. Only a reroll changes the epoch.
-- `update_remote_cosmetics` compares the `Shuffle` (mode and seed) it last used as well as the
-  recipes, so changing the mode or rerolling puts every skater's outfit and board on again. The
+- `update_remote_cosmetics` compares the `Shuffle` (mode, seed and `mods_only`) it last used as well
+  as the recipes, so changing the mode or the pool, or rerolling, puts every skater's outfit and board
+  on again. The
   session bumps each peer's `cosmetic_revision` so those applies are spread over frames, one native
   pass per frame. An off shuffle is always the default one, so Nothing never re-applies.
 - The menus read the mode from the view (`MultiplayerModel::outfit_shuffle`), which carries the
-  `ShuffleMode` value, and send the console words above.
+  `ShuffleMode` value, and `outfit_shuffle_mods_only`, and send the console words above.
 - **Room for textures.** Every item picked can bring a bundle of its own, and the game freezes
   when it needs one streamed texture more than it can hold (`texture_handle_limit`). The game does
   not let an item's textures go once loaded, even when nobody wears it any more, so every item put

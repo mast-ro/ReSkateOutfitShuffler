@@ -198,6 +198,32 @@ int main() {
               "Shuffling from what is worn picks only those items");
     }
 
+    // Mod items only: the shuffle picks from the items a mod installed, and a slot no mod item
+    // fits keeps what it shows.
+    {
+        const ShuffleCatalog mixed({{"Own_TopShirt_A", {tops}},
+                                    {"Own_TopShirt_B", {tops}},
+                                    {"Mod_Top", {tops}, true},
+                                    {"Mod_Overalls", {tops, bottoms}, true},
+                                    {"Own_BottomPants_B", {bottoms}},
+                                    {"Own_Hat_A", {hats}}});
+        const auto mods = mixed.mods();
+        check(mods.size() == 2 && mods.modded(0) && mods.modded(1), "Only the mod items stay");
+        check(mods.in_category(tops) && mods.in_category(tops)->size() == 2 && mods.in_category(bottoms) &&
+                  mods.in_category(bottoms)->size() == 1 && !mods.in_category(hats),
+              "A mod item keeps every category it fits");
+        check(ShuffleCatalog({{"Own_TopShirt_A", {tops}}}).mods().size() == 0, "No mod items: nothing to pick");
+        check(mixed.only({"Mod_Top", "Own_Hat_A"}).mods().size() == 1, "Loaded items keep whether a mod installed them");
+        auto r = worn();
+        r.items[2].asset = "Own_Hat_A";
+        shuffle_recipe(r, categories, mods, seed);
+        check(r.items[0].asset.starts_with("Mod_") && r.items[1].asset == "Mod_Overalls", "Worn items became mod items");
+        check(r.items[2].asset == "Own_Hat_A", "A slot no mod item fits kept what it shows");
+        const Shuffle mods_clothes{ShuffleMode::everything, seed, true};
+        check(mods_clothes.board().mods_only && mods_clothes != Shuffle{ShuffleMode::everything, seed},
+              "The board keeps mods only, and turning it on is a new shuffle");
+    }
+
     // Room for textures: past 80% of the limit only worn items are picked.
     check(shuffle_texture_room(0, 20480) && shuffle_texture_room(16383, 20480), "Below 80% there is room");
     check(!shuffle_texture_room(16384, 20480) && !shuffle_texture_room(20480, 20480) && !shuffle_texture_room(32764, 32764),

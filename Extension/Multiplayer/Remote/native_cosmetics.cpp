@@ -5,6 +5,7 @@
 #include "Engine/Game/Build/addresses.h"
 #include "Engine/Game/Build/20260929/engine.h"
 #include "Engine/Game/Build/20260929/native_cosmetics.h"
+#include "Engine/Vfs/content_catalogs.h"
 #include "Extension/Customization/local_customization_runtime.h"
 #include "Extension/Customization/local_player_card_runtime.h"
 #include "Extension/World/texture_handle_limit.h"
@@ -30,22 +31,33 @@ template <class T> void put(std::uintptr_t p, const T &value) {
         throw std::runtime_error("Cannot update the remote cosmetic component.");
 }
 // The catalog the shuffle draws from: what is installed, less the items only their owners may
-// wear. It is names only, so it is kept until the number of installed items changes (a mod
-// applied live). Client thread.
-template <class Memory> const ShuffleCatalog &shuffle_catalog(const Memory &memory) {
-    static ShuffleCatalog kept;
+// wear, or with `mods_only` just the items a mod installed (those in no retail catalogue of the
+// content cache, as the item browser judges them). It is names only, so it is kept until the
+// number of installed items changes (a mod applied live). Client thread.
+template <class Memory> const ShuffleCatalog &shuffle_catalog(const Memory &memory, bool mods_only = false) {
+    static ShuffleCatalog kept, mods;
     static std::uintptr_t manager{};
     static std::uint32_t total{};
     const auto now = memory.ptr(memory.base, addr::engine::cosmetics_manager);
     const auto count = memory.template get<std::uint32_t>(now, 0x3c);
-    if (kept.size() && now == manager && count == total) return kept;
+    if (kept.size() && now == manager && count == total) return mods_only ? mods : kept;
+    const auto &retail = content_cache::catalogs();
     std::vector<ShuffleCandidate> items;
-    for (auto &item : memory.catalog())
-        if (!profile_runtime::reserved_cosmetic(item.name)) items.push_back({std::move(item.name), std::move(item.categories)});
+    for (auto &item : memory.catalog()) {
+        if (profile_runtime::reserved_cosmetic(item.name)) continue;
+        std::string key = item.name;
+        for (auto &c : key) if (c >= 'A' && c <= 'Z') c = static_cast<char>(c + ('a' - 'A'));
+        const bool modded = retail.available && !retail.items.contains(key);
+        items.push_back({std::move(item.name), std::move(item.categories), modded});
+    }
     kept = ShuffleCatalog(std::move(items));
+    mods = kept.mods();
     manager = now;
     total = count;
-    return kept;
+    logging::log(logging::Level::info, logging::Channel::runtime,
+                 "Multiplayer: shuffled outfits catalog has {} items, {} of them from mods{}.", kept.size(), mods.size(),
+                 retail.available ? "" : " (no content pack installed, so none can be told apart)");
+    return mods_only ? mods : kept;
 }
 // Every item put on a skater or board in this level, shuffled or not, and the local player's
 // own. The game keeps an item's textures once they are loaded, so near its limit of streamed
@@ -215,7 +227,7 @@ void apply_cosmetic_recipe(std::uintptr_t base, std::uintptr_t entity, std::uint
         auto as_sent = usable;
         try {
             const auto textures = texture_handle_limit::use();
-            const auto &catalog = shuffle_catalog(memory);
+            const auto &catalog = shuffle_catalog(memory, shuffle.mods_only);
             if (!textures.known || shuffle_texture_room(textures.taken, textures.limit))
                 shuffle_recipe(usable, memory.slot_categories(resource), catalog, shuffle.seed, shuffled);
             else
@@ -227,8 +239,9 @@ void apply_cosmetic_recipe(std::uintptr_t base, std::uintptr_t entity, std::uint
             static std::atomic<unsigned> reported{};
             if (reported.fetch_add(1) < 3)
                 logging::log(logging::Level::warning, logging::Channel::runtime,
-                             "Multiplayer: a player's {} could not be shuffled, so it is shown with stand-ins: {}",
-                             recipe.key == board_recipe_key ? "board" : "outfit", e.what());
+                             "Multiplayer: a player's {} could not be shuffled ({}), so it is shown with stand-ins: {}",
+                             recipe.key == board_recipe_key ? "board" : "outfit",
+                             shuffle.mods_only ? "mod items only" : "every item", e.what());
         }
     }
     memory.validate(resource, usable);
